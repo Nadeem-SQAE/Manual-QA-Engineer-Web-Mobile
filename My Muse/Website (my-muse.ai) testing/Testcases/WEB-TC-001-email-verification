@@ -1,0 +1,132 @@
+# WEB-TC-001 — Verify Website Requires Email Verification Before Granting Access
+
+---
+
+## Test Case Details
+
+| Field | Details |
+|---|---|
+| **TC ID** | WEB-TC-001 |
+| **Title** | Verify website requires email verification before granting access during first-time sign-in |
+| **Priority** | P1 — High |
+| **Severity** | High |
+| **Type** | Security / Functional |
+| **Date Executed** | March 16, 2026 |
+| **Executed By** | Muhammad Nadeem |
+| **Status** | ❌ FAIL |
+| **Bug Filed** | [WEB-BUG-001](../bug-reports/WEB-BUG-001-no-email-verification.md) |
+
+---
+
+## Environment
+
+| Field | Details |
+|---|---|
+| **Platform** | Website — my-muse.ai |
+| **Browser** | Google Chrome 142.0.7444.177 |
+| **OS** | Windows |
+| **Network** | WiFi |
+| **QA Engineer** | Muhammad Nadeem |
+| **Date** | March 16, 2026 |
+
+---
+
+## Pre-conditions
+
+- Chrome browser is open and user is **not** logged in to my-muse.ai (no active session)
+- Test email `musetest@gmail.com` has never been registered on my-muse.ai before
+- Chrome DevTools is open (`F12`) with the **Network** tab active, filter set to **Fetch/XHR**, and log cleared
+- Test executed in **Incognito mode** to ensure no cached session data affects results
+
+---
+
+## Test Data
+
+| Field | Value |
+|---|---|
+| **Test Email** | `musetest@gmail.com` |
+
+---
+
+## Test Steps
+
+| Step | Action | Observation Point |
+|---|---|---|
+| 1 | Open Chrome in Incognito mode and navigate to `my-muse.ai` | — |
+| 2 | Verify that the homepage loads and a **"Sign In"** button is visible | ✅ Confirm before proceeding |
+| 3 | Press `F12` → select **Network** tab → set filter to **Fetch/XHR** → click **Clear** to clear the existing log | — |
+| 4 | Click the **"Sign In"** button on the homepage | — |
+| 4b | Before typing anything — observe whether any network request fires immediately on modal open | 👁 Note any pre-auth requests firing before user input |
+| 5 | Enter `musetest@gmail.com` in the email input field | — |
+| 6 | Click the **"Continue"** button | — |
+| 7 | Observe whether a verification message or next-step prompt appears on screen | 👁 Note exactly what is displayed |
+| 8 | Observe whether the user is redirected or remains on the sign-in screen | 👁 Note current page and URL |
+| 9 | In the Network tab, locate the auth request (look for `/auth`, `/login`, `/signup`, or `identitytoolkit`) | 👁 Note endpoint URL and HTTP method |
+| 10 | Click the auth request → open **Payload** tab → screenshot the full request body | 👁 Check whether email is in request body or URL query string |
+| 11 | Click the auth request → open **Response** tab → screenshot the full response body | 👁 Check for `emailVerified`, `idToken`, `user_id`, `created_at`, `userFromFirestore` |
+| 12 | In the Network tab search bar, type `verify` → screenshot the result | 👁 Note total request count shown at the bottom of DevTools |
+| 13 | Navigate to `my-muse.ai/account` | 👁 Note whether access is granted or user is redirected to sign-in |
+
+---
+
+## Expected Result
+
+| # | Expected Behaviour |
+|---|---|
+| 1 | Website sends a verification email to the provided address before granting any access |
+| 2 | A message is displayed on screen: *"Please check your inbox to verify your email before continuing"* (or equivalent) |
+| 3 | User is **not** granted any session, token, or access until the verification link in the email is clicked and confirmed |
+| 4 | DevTools Network tab shows a call to a verification or magic-link endpoint (e.g. `/send-verification`, `/magic-link`), OR the identityToolkit response contains `"emailVerified": false` with **no** `idToken` returned |
+| 5 | Navigating to `my-muse.ai/account` redirects the user back to the sign-in screen |
+| 6 | Opening the Sign In modal should not trigger any server request before the user has entered any data |
+
+---
+
+## Actual Result
+
+| # | Actual Behaviour |
+|---|---|
+| 1 | Opening the **"Sign In"** modal immediately triggered a pre-auth request to `httpapi` → `200 OK` (969 ms) — before any email was entered |
+| 2 | No verification message was displayed on screen at any point after clicking Continue |
+| 3 | User was immediately logged in and redirected — no additional confirmation step shown |
+| 4 | `accounts:signInWithPassword` and `accounts:lookup` both returned `200 OK` — Firebase granted a full authenticated session instantly |
+| 5 | **Payload tab** showed the email sent as a **URL query string parameter**, not in the request body |
+| 6 | **Response tab** returned a full user profile in a single `200 OK` — including `user_id`, `email`, `geo`, `ip`, `created_at` and `updated_at` (identical timestamps), and `userFromFirestore: [{ "email": "musetest@gmail.com" }]` confirming the account was permanently written to the Firestore database with no pending or unverified state |
+| 7 | `send_emails: true` was present in the response — the email system is configured but no verification email was dispatched |
+| 8 | Network tab filtered by `verify` returned **0 / 36 requests** — no verification endpoint was called anywhere in the entire session |
+| 9 | `my-muse.ai/account?email=musetest%40gmail.com` loaded successfully — **My Account** page displayed email and a live **Subscriptions** link with no redirect to sign-in |
+
+---
+
+## Root Cause Indicator
+
+> Firebase Authentication is configured to create and activate accounts on first email submission with no verification gate. The server returns a full `idToken` and writes the user to Firestore in a single response. The application does not enforce `emailVerified: true` at any point before granting an authenticated session.
+
+---
+
+## Bug Reference
+
+> This test case resulted in a **FAIL**. All evidence (screenshots, Network tab recordings, response body data) is documented in the linked bug report.
+>
+> 📋 See: [WEB-BUG-001 — No Email Verification on Web Sign-In](../bug-reports/WEB-BUG-001-no-email-verification.md)
+
+---
+
+## Additional Findings (Out of Scope — Separate TCs)
+
+> The following issues were observed during this test session but are out of scope for WEB-TC-001. Noted here for triage — to be covered in separate test cases and bug reports.
+
+| Finding | Notes |
+|---|---|
+| Email transmitted as URL query string parameter (`?email=musetest@gmail.com`) instead of POST body | Violates OWASP guidelines for PII handling — leaks in browser history, server logs, CDN logs |
+| Pre-auth `httpapi` request fires on Sign In modal open before user enters any data | Investigate payload — may indicate premature session initialization |
+| Internal config fields returned to client in auth response (`spam_project_id`, `sendios_config`, `capi_config`, `amplitude_config`) | Potential over-exposure of internal system configuration |
+
+---
+
+## Notes
+
+- My Muse does not use passwords — email is the sole identifier. The absence of verification carries a higher risk than in a password-based system, as any actor can register using an email address they do not own.
+- This test case covers **first-time sign-in (account creation) only**. Returning-user sign-in behaviour to be covered in a separate test case.
+- This issue is cross-platform: the same vulnerability was observed on Android (see `Android BUG-003`). Neither platform enforces email verification.
+- Bug filed as **WEB-BUG-001** with severity High.
