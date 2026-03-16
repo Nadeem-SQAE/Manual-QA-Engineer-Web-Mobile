@@ -20,7 +20,7 @@
 | Field | Details |
 |---|---|
 | **App** | My Muse |
-| **App Version** | 1.0.38 |
+| **App Version** | 1.0.39 |
 | **Platform** | Android |
 | **Device** | Vivo V2102 |
 | **Android Version** | 11 |
