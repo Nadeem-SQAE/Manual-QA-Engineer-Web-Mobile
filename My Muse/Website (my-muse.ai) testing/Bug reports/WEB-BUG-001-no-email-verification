@@ -1,0 +1,146 @@
+# WEB-BUG-001 — No Email Verification on Web Sign-In
+
+---
+
+## Bug Details
+
+| Field | Details |
+|---|---|
+| **Bug ID** | WEB-BUG-001 |
+| **Title** | [Sign-In] Website allows account creation with any email — no verification required |
+| **Reported By** | Muhammad Nadeem |
+| **Date Reported** | March 16, 2026 |
+| **Found Via** | Manual test execution — WEB-TC-001 |
+| **Related TC** | [WEB-TC-001](../test-cases/WEB-TC-001-email-verification.md) |
+
+---
+
+## Environment
+
+| Field | Details |
+|---|---|
+| **Platform** | Website — my-muse.ai |
+| **Browser** | Google Chrome 142.0.7444.177 |
+| **OS** | Windows |
+| **Network** | WiFi |
+| **QA Engineer** | Muhammad Nadeem |
+| **Date** | March 16, 2026 |
+
+---
+
+## Classification
+
+| Field | Details |
+|---|---|
+| **Severity** | High |
+| **Priority** | High |
+| **Type** | Security / Functional |
+| **Reproducibility** | Always — 100% reproducible |
+| **Status** | Open |
+| **Assigned To** | Pending triage |
+
+---
+
+## Steps to Reproduce
+
+1. Open Chrome in Incognito mode and navigate to `my-muse.ai`. Confirm user is not logged in.
+2. Open DevTools (`F12`) → **Network** tab → filter **Fetch/XHR** → click **Clear**.
+3. Click the **"Sign In"** button on the homepage.
+4. Enter any email address  — e.g. `musetest@gmail.com`.
+5. Click **"Continue"**.
+6. Observe: no password field appears, no verification message is shown.
+7. Observe: user is immediately logged in and redirected.
+8. In the Network tab, click the `musetest@gmail.com` XHR request → open **Response** tab.
+9. Observe: full user profile including `user_id`, `created_at`, and `userFromFirestore` is returned in a single `200 OK` response.
+10. In the Network tab search bar, type `verify` — observe **0 / 36 requests** returned.
+11. Navigate to `my-muse.ai/account` — observe full account page is accessible.
+
+---
+
+## Expected Result
+
+1. Website sends a verification email to the provided address before granting any access.
+2. A message is displayed: *"Please check your inbox to verify your email before continuing."*
+3. Access is fully blocked until the verification link is clicked.
+4. Account is only created and session only issued after email ownership is confirmed.
+5. `my-muse.ai/account` redirects back to sign-in for any unverified user.
+
+---
+
+## Actual Result
+
+- Opening the **"Sign In"** modal triggered a pre-auth `httpapi` request (`200 OK`, 969 ms) before any email was entered.
+- No verification message was displayed at any point.
+- No verification email was sent to the provided address.
+- User was immediately logged in and redirected after clicking **Continue**.
+- **Payload tab** of the auth XHR showed email sent as a URL query string parameter — not in the request body.
+- **Response tab** returned a full user profile in a single `200 OK`:
+
+```json
+{
+  "user_id": "869826c4-6325-4dd9-...",
+  "uid": "w91wkWh4UMhH5pwMnx6S0F3",
+  "email": "musetest@gmail.com",
+  "geo": "PK",
+  "ip": "14.1.104.249",
+  "created_at": "2026-03-16T06:50:...",
+  "updated_at": "2026-03-16T06:50:...",
+  "send_emails": true,
+  "userFromFirestore": [
+    { "email": "musetest@gmail.com" }
+  ]
+}
+```
+
+- `created_at` and `updated_at` are **identical** — account created and activated in the same instant with no pending or unverified state.
+- `send_emails: true` is present in the response config — the email infrastructure is active but no verification email was dispatched.
+- `userFromFirestore` confirms the account is **permanently written to the Firestore database** immediately — no temporary or unverified holding state.
+- Network tab filtered by `verify` returned **0 / 36 requests** — no verification endpoint was called at any point in the session.
+- `my-muse.ai/account?email=musetest%40gmail.com` loaded successfully — **My Account** page displayed email and live Subscriptions link.
+
+---
+
+## Impact Analysis
+
+| Impact Area | Description |
+|---|---|
+| **Account Takeover Risk** | Any actor can create a My Muse account using another person's real email address. The legitimate owner receives no notification and is effectively blocked from registering with their own email. |
+| **Subscription Fraud** | A user can initiate or complete a subscription purchase using an email they do not own. Payment confirmations and receipts are sent to an inaccessible address, creating billing and chargeback risk. |
+| **Broken Account Recovery** | Users who mistype their email during sign-in have no recovery path — support and reset communications go to an address they cannot access. |
+| **Data Integrity** | My Muse cannot reliably contact its user base. Transactional emails, subscription notices, and marketing communications will fail to reach real users. |
+| **Ad Tracking on Unverified Users** | `capi_config` with `external_id` is assigned at account creation — unverified users are immediately enrolled in Facebook CAPI ad tracking. |
+| **Industry Standard Violation** | Email verification on account creation is a universal security baseline (Netflix, Spotify, YouTube, Apple ID). The current implementation does not meet this standard. |
+
+---
+
+## Cross-Platform Note
+
+> This is the web equivalent of **Android BUG-003**. The same security vulnerability — account creation without email verification — is present on both the Android app and the website. Neither platform verifies email ownership before granting an authenticated session.
+
+---
+
+## Evidence
+
+https://drive.google.com/file/d/1eSOQAi5tP2qCIbPnWb_3vBvjZ1pYOLDJ/view?usp=drive_link
+https://drive.google.com/file/d/1dAyGz7FYr7ymKQ5T1pgQTP-qUFIV-zyF/view?usp=drive_link
+
+
+---
+
+## Suggested Fix
+
+1. After email submission, dispatch a verification link to the provided address **before** issuing any `idToken` or session token.
+2. Display an on-screen message: *"We've sent a verification link to your email. Please check your inbox to continue."*
+3. Block all access — including browsing, content playback, and purchase flows — until the verification link has been clicked and confirmed.
+4. Enforce `emailVerified: true` **server-side** before generating and returning an `idToken`. Do not rely solely on client-side checks.
+5. Set the Firestore user record to a `status: "pending"` state until verification is complete — do not write an active record on first submission.
+6. Expire unverified accounts after 48 hours to maintain database hygiene.
+
+---
+
+## Notes
+
+- My Muse does not use passwords — email is the sole identifier. This makes the absence of verification a higher risk than in a password-based system.
+- This bug was found during **first-time sign-in testing only**. Whether returning users face the same issue is to be verified in a separate test case.
+- `send_emails: true` in the server response confirms the email infrastructure is active and capable of sending — the verification email is simply never triggered.
+- Additional out-of-scope findings observed during this session (email in URL query string, pre-auth request on modal open, internal config over-exposure) have been noted in WEB-TC-001 and will be filed as separate bugs.
