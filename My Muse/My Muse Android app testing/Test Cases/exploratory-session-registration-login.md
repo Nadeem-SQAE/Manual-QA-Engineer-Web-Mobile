@@ -6,7 +6,7 @@
 |---|---|
 | **Date** | March 13, 2026 |
 | **Tester** | Muhammad Nadeem |
-| **App** | My Muse v1.0.38 |
+| **App** | My Muse v1.0.39 |
 | **Platform** | Android |
 | **Device** | Android Studio — Android 14 |
 | **Network** | Wifi |
